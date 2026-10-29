@@ -136,11 +136,12 @@ def carregar_dados_contas(ws):
     return df
 
 # ==========================================
-# SIDEBAR - CARREGAMENTO / REGISTRO COM RAIO-X
+# SIDEBAR - CARREGAMENTO / REGISTRO COM RAIO-X ABERTO
 # ==========================================
 st.sidebar.header("📥 Registar Novo Mês no Histórico")
 
-with st.sidebar.expander("Upload de Dados (Simplesvet)"):
+# Alterado para expanded=True para que o uploader apareça logo aberto na barra lateral
+with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
     uploaded_file = st.file_uploader("Enviar CSV do Simplesvet", type=["csv"])
     
     if uploaded_file:
@@ -231,7 +232,7 @@ df_historico = carregar_dados_vendas(ws_historico)
 df_contas_historico = carregar_dados_contas(ws_contas_pagas)
 
 if df_historico.empty or df_historico['Líquido'].sum() == 0:
-    st.info("ℹ️ A base de dados de vendas no Google Sheets está vazia. Use o painel lateral para enviar o primeiro CSV do Simplesvet.")
+    st.info("ℹ️ A base de dados de vendas no Google Sheets está vazia. Use o painel lateral à esquerda para enviar o seu primeiro ficheiro CSV do Simplesvet.")
     st.stop()
 
 # Ordena os meses cronologicamente de forma correta
