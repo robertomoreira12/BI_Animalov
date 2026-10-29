@@ -8,12 +8,21 @@ st.set_page_config(page_title="Animalov - BI Histórico & Comparativo", page_ico
 
 st.title("🐾 Animalov - Central de BI & Inteligência Financeira")
 
-# Conexão com Google Sheets via Secrets
+# Conexão com Google Sheets via Secrets (com tratamento blindado da chave privada)
 @st.cache_resource
 def conectar_google_sheets():
     credenciais_dict = dict(st.secrets["gcp_service_account"])
+    
+    # Tratamento blindado da chave privada para evitar erros de PEM
     if "private_key" in credenciais_dict:
-        credenciais_dict["private_key"] = credenciais_dict["private_key"].replace("\\n", "\n")
+        pk = credenciais_dict["private_key"]
+        # Remove eventuais aspas extras duplicadas
+        pk = pk.strip('"').strip("'")
+        # Converte a representação literal '\n' em quebra de linha real
+        if "\\n" in pk:
+            pk = pk.replace("\\n", "\n")
+        credenciais_dict["private_key"] = pk
+
     gc = gspread.service_account_from_dict(credenciais_dict)
     id_planilha = "13gngB_axx-1L__qqoA2PGUXFp9XVexJA_zYQADUNOtQ"
     sh = gc.open_by_key(id_planilha)
@@ -22,7 +31,6 @@ def conectar_google_sheets():
         ws = sh.worksheet('Historico_Vendas')
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title='Historico_Vendas', rows=1000, cols=20)
-        # Cria cabeçalhos na planilha caso seja nova
         ws.append_row([
             'Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 
             'Grupo', 'Tipo_Item', 'Contas_Pagas_Mes'
