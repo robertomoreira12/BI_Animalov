@@ -2,28 +2,37 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import gspread
+import json
+import tempfile
+import os
 
 # Configuração da Página
 st.set_page_config(page_title="Animalov - BI Histórico & Comparativo", page_icon="🐾", layout="wide")
 
 st.title("🐾 Animalov - Central de BI & Inteligência Financeira")
 
-# Conexão com Google Sheets via Secrets (com tratamento blindado da chave privada)
+# Conexão com Google Sheets via Secrets (com tratamento blindado da chave privada e arquivo temporário)
 @st.cache_resource
 def conectar_google_sheets():
     credenciais_dict = dict(st.secrets["gcp_service_account"])
     
-    # Tratamento blindado da chave privada para evitar erros de PEM
     if "private_key" in credenciais_dict:
         pk = credenciais_dict["private_key"]
-        # Remove eventuais aspas extras duplicadas
         pk = pk.strip('"').strip("'")
-        # Converte a representação literal '\n' em quebra de linha real
         if "\\n" in pk:
             pk = pk.replace("\\n", "\n")
         credenciais_dict["private_key"] = pk
 
-    gc = gspread.service_account_from_dict(credenciais_dict)
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as f:
+        json.dump(credenciais_dict, f)
+        temp_path = f.name
+
+    try:
+        gc = gspread.service_account(filename=temp_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
     id_planilha = "13gngB_axx-1L__qqoA2PGUXFp9XVexJA_zYQADUNOtQ"
     sh = gc.open_by_key(id_planilha)
     
@@ -44,7 +53,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# SIDEBAR - NOVO CARREGAMENTO / REGISTRO
+# SIDEBAR - CARREGAMENTO / REGISTRO
 # ==========================================
 st.sidebar.header("📥 Registrar Novo Mês no Histórico")
 
@@ -82,7 +91,6 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
 
             df_new['Departamento'] = df_new.apply(classificar_departamento, axis=1)
             
-            # Prepara dados limpos para salvar no Sheets
             df_salvar = pd.DataFrame({
                 'Mes_Ano': df_new['Mes_Ano'],
                 'Data_Hora': df_new['Data_Hora'].dt.strftime('%Y-%m-%d %H:%M'),
@@ -94,7 +102,6 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
                 'Contas_Pagas_Mes': contas_pagas_input
             }).dropna(subset=['Mes_Ano'])
 
-            # Atualiza na planilha (substitui se o mês já existir ou adiciona se for novo)
             dados_existentes = ws_historico.get_all_records()
             df_existente = pd.DataFrame(dados_existentes)
             
@@ -121,7 +128,6 @@ if df_historico.empty:
     st.info("ℹ️ A base de dados no Google Sheets está vazia. Use o painel lateral para enviar o primeiro CSV do Simplesvet.")
     st.stop()
 
-# Garantir tipos corretos
 df_historico['Líquido'] = pd.to_numeric(df_historico['Líquido'], errors='coerce').fillna(0)
 df_historico['Contas_Pagas_Mes'] = pd.to_numeric(df_historico['Contas_Pagas_Mes'], errors='coerce').fillna(0)
 meses_disponiveis = sorted(df_historico['Mes_Ano'].unique().tolist())
@@ -194,7 +200,6 @@ elif modo_analise == "Comparativo Entre Meses":
         res1, fat1, cp1 = calcular_resumo(df_historico[df_historico['Mes_Ano'] == mes1])
         res2, fat2, cp2 = calcular_resumo(df_historico[df_historico['Mes_Ano'] == mes2])
         
-        # Consolidação Comparativa
         comp = pd.merge(res1[['Departamento', 'Faturamento', 'Resultado Líquido']], 
                         res2[['Departamento', 'Faturamento', 'Resultado Líquido']], 
                         on='Departamento', how='outer', suffixes=(f' ({mes1})', f' ({mes2})')).fillna(0)
