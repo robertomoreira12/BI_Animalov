@@ -11,14 +11,14 @@ st.set_page_config(page_title="Animalov - BI Histórico & Comparativo", page_ico
 
 st.title("🐾 Animalov - Central de BI & Inteligência Financeira")
 
-# Conexão com Google Sheets via Secrets (com tratamento blindado da chave privada e arquivo temporário)
+# Ligação com Google Sheets via Secrets (com tratamento blindado da chave privada e ficheiro temporário)
 @st.cache_resource
-def conectar_google_sheets():
+def ligar_google_sheets():
     credenciais_dict = dict(st.secrets["gcp_service_account"])
     
     if "private_key" in credenciais_dict:
-        pk = credenciais_dict["private_key"]
-        pk = pk.strip('"').strip("'")
+        pk = str(credenciais_dict["private_key"])
+        pk = pk.strip('"').strip("'").strip()
         if "\\n" in pk:
             pk = pk.replace("\\n", "\n")
         credenciais_dict["private_key"] = pk
@@ -47,22 +47,22 @@ def conectar_google_sheets():
     return ws
 
 try:
-    ws_historico = conectar_google_sheets()
+    ws_historico = ligar_google_sheets()
 except Exception as e:
-    st.error(f"Erro ao conectar com a base do Google Sheets: {e}")
+    st.error(f"Erro ao ligar com a base do Google Sheets: {e}")
     st.stop()
 
 # ==========================================
 # SIDEBAR - CARREGAMENTO / REGISTRO
 # ==========================================
-st.sidebar.header("📥 Registrar Novo Mês no Histórico")
+st.sidebar.header("📥 Registar Novo Mês no Histórico")
 
 with st.sidebar.expander("Upload de Dados (Simplesvet)"):
     contas_pagas_input = st.number_input("Total Contas Pagas do Mês (R$):", min_value=0.0, value=30000.00, step=500.00)
     uploaded_file = st.file_uploader("Enviar CSV do Simplesvet", type=["csv"])
     
-    if uploaded_file and st.button("💾 Salvar/Atualizar no Google Sheets"):
-        with st.spinner("Processando e salvando na base histórica..."):
+    if uploaded_file and st.button("💾 Guardar/Atualizar no Google Sheets"):
+        with st.spinner("A processar e a guardar na base histórica..."):
             df_new = pd.read_csv(uploaded_file, sep=';', encoding='latin1', on_bad_lines='skip')
             
             df_new['Data_Hora'] = pd.to_datetime(df_new['Data e hora'], format='%d/%m/%Y %H:%M', errors='coerce')
@@ -115,7 +115,7 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
 
             ws_historico.clear()
             ws_historico.update([df_final_base.columns.values.tolist()] + df_final_base.values.tolist())
-            st.success(f"Mês {mes_carregado} registrado/atualizado com sucesso!")
+            st.success(f"Mês {mes_carregado} registado/atualizado com sucesso!")
             st.rerun()
 
 # ==========================================
