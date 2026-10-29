@@ -11,18 +11,29 @@ st.set_page_config(page_title="Animalov - BI Histórico & Comparativo", page_ico
 
 st.title("🐾 Animalov - Central de BI & Inteligência Financeira")
 
-# Ligação com Google Sheets via Secrets (com tratamento blindado da chave privada e ficheiro temporário)
+# Ligação com Google Sheets via Secrets (com normalização avançada da chave privada)
 @st.cache_resource
 def ligar_google_sheets():
     credenciais_dict = dict(st.secrets["gcp_service_account"])
     
     if "private_key" in credenciais_dict:
         pk = str(credenciais_dict["private_key"])
+        
+        # Remove aspas ou espaços excedentes
         pk = pk.strip('"').strip("'").strip()
+        
+        # Converte sequências de escape literais '\n' em quebras de linha reais
         if "\\n" in pk:
             pk = pk.replace("\\n", "\n")
+            
+        # Garante que as linhas do PEM estão limpas de espaços em branco nas pontas
+        linhas = pk.splitlines()
+        linhas_limpas = [linha.strip() for linha in linhas if linha.strip()]
+        pk = "\n".join(linhas_limpas)
+        
         credenciais_dict["private_key"] = pk
 
+    # Cria um ficheiro JSON temporário seguro em memória para o gspread ler perfeitamente
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as f:
         json.dump(credenciais_dict, f)
         temp_path = f.name
