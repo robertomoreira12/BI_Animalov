@@ -255,4 +255,117 @@ def obter_contas_mes(mes):
 # NAVEGAÇÃO E ANÁLISE NO STREAMLIT
 # ==========================================
 st.sidebar.divider()
-modo_analise = st.sidebar.radio("🔍
+modo_analise = st.sidebar.radio("🔍 Modo de Análise", ["Mês Individual", "Comparativo Entre Meses", "Visão Geral do Histórico"])
+
+def calcular_resumo(mes_sel):
+    df_filtrado = df_historico[df_historico['Mes_Ano'] == mes_sel]
+    contas_pagas = obter_contas_mes(mes_sel)
+    fat_total = df_filtrado['Líquido'].sum()
+    
+    resumo = df_filtrado.groupby('Departamento')['Líquido'].sum().reset_index()
+    resumo.rename(columns={'Líquido': 'Faturamento'}, inplace=True)
+    resumo['% Share'] = resumo['Faturamento'] / fat_total if fat_total > 0 else 0
+    resumo['Custo Rateado'] = resumo['% Share'] * contas_pagas
+    resumo['Resultado Líquido'] = resumo['Faturamento'] - resumo['Custo Rateado']
+    resumo['Margem %'] = resumo['Resultado Líquido'] / resumo['Faturamento']
+    return resumo, fat_total, contas_pagas
+
+# 1. MÊS INDIVIDUAL
+if modo_analise == "Mês Individual":
+    mes_sel = st.selectbox("Selecione o Mês para Análise:", meses_disponiveis, index=len(meses_disponiveis)-1)
+    
+    resumo, fat_total, contas_pagas = calcular_resumo(mes_sel)
+    
+    st.subheader(f"📊 Relatório Financeiro: {mes_sel}")
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Faturamento Total", f"R$ {fat_total:,.2f}")
+    c2.metric("Contas Pagas (Sheets)", f"R$ {contas_pagas:,.2f}")
+    c3.metric("Resultado Líquido", f"R$ {fat_total - contas_pagas:,.2f}")
+    
+    st.divider()
+    
+    st.dataframe(
+        resumo.style.format({
+            'Faturamento': 'R$ {:,.2f}',
+            '% Share': '{:.1%}',
+            'Custo Rateado': 'R$ {:,.2f}',
+            'Resultado Líquido': 'R$ {:,.2f}',
+            'Margem %': '{:.1%}'
+        }), use_container_width=True
+    )
+    
+    col_g1, col_g2 = st.columns(2)
+    with col_g1:
+        fig1 = px.bar(resumo, x='Departamento', y='Faturamento', title='Faturamento por Departamento', color='Faturamento', color_continuous_scale='Blues')
+        st.plotly_chart(fig1, use_container_width=True)
+    with col_g2:
+        fig2 = px.pie(resumo, values='Faturamento', names='Departamento', title='Distribuição do Faturamento (% Share)')
+        st.plotly_chart(fig2, use_container_width=True)
+
+# 2. COMPARATIVO ENTRE MESES
+elif modo_analise == "Comparativo Entre Meses":
+    st.subheader("⚔️ Comparativo Direto Entre Dois Meses")
+    
+    if len(meses_disponiveis) < 2:
+        st.warning("É necessário carregar pelo menos 2 meses no histórico para fazer análises comparativas.")
+    else:
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            mes1 = st.selectbox("Selecione o Mês Base (Mês 1):", meses_disponiveis, index=0)
+        with col_m2:
+            mes2 = st.selectbox("Selecione o Mês de Comparação (Mês 2):", meses_disponiveis, index=len(meses_disponiveis)-1)
+            
+        res1, fat1, cp1 = calcular_resumo(mes1)
+        res2, fat2, cp2 = calcular_resumo(mes2)
+        
+        comp = pd.merge(res1[['Departamento', 'Faturamento', 'Resultado Líquido']], 
+                        res2[['Departamento', 'Faturamento', 'Resultado Líquido']], 
+                        on='Departamento', how='outer', suffixes=(f' ({mes1})', f' ({mes2})')).fillna(0)
+        
+        comp['Variação Fat (R$)'] = comp[f'Faturamento ({mes2})'] - comp[f'Faturamento ({mes1})']
+        comp['Crescimento (%)'] = (comp['Variação Fat (R$)'] / comp[f'Faturamento ({mes1})']).fillna(0)
+
+        st.divider()
+        st.markdown(f"#### 📈 Variação de Faturamento Total: **{((fat2 - fat1)/fat1)*100:+.1f}%**")
+        
+        st.dataframe(
+            comp.style.format({
+                f'Faturamento ({mes1})': 'R$ {:,.2f}',
+                f'Faturamento ({mes2})': 'R$ {:,.2f}',
+                f'Resultado Líquido ({mes1})': 'R$ {:,.2f}',
+                f'Resultado Líquido ({mes2})': 'R$ {:,.2f}',
+                'Variação Fat (R$)': 'R$ {:,.2f}',
+                'Crescimento (%)': '{:+.1%}'
+            }), use_container_width=True
+        )
+
+        fig_comp = px.bar(
+            comp, x='Departamento', y=[f'Faturamento ({mes1})', f'Faturamento ({mes2})'],
+            barmode='group', title=f'Comparativo de Faturamento: {mes1} vs {mes2}'
+        )
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+# 3. VISÃO GERAL DO HISTÓRICO
+elif modo_analise == "Visão Geral do Histórico":
+    st.subheader("📈 Evolução Histórica Completa")
+    
+    lista_evo = []
+    for m in meses_disponiveis:
+        df_m = df_historico[df_historico['Mes_Ano'] == m]
+        fat_m = df_m['Líquido'].sum()
+        custo_m = obter_contas_mes(m)
+        lista_evo.append({
+            'Mes_Ano': m,
+            'Líquido': fat_m,
+            'Contas_Pagas': custo_m,
+            'Resultado Líquido': fat_m - custo_m
+        })
+        
+    df_evo = pd.DataFrame(lista_evo)
+    
+    fig_evo = px.line(
+        df_evo, x='Mes_Ano', y=['Líquido', 'Contas_Pagas', 'Resultado Líquido'],
+        markers=True, title='Evolução Mensal de Faturamento, Custos e Resultado'
+    )
+    st.plotly_chart(fig_evo, use_container_width=True)
