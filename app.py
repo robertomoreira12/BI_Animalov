@@ -1,134 +1,139 @@
-import json
-import gspread
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import plotly.express as px
 
-# Configuração da Página no Navegador
-st.set_page_config(page_title="Animalov - Atualizador de BI", page_icon="🐾", layout="centered")
+# Configuração da Página no Navegador (Layout Largo para aproveitar a tela)
+st.set_page_config(page_title="Animalov - BI & Gestão", page_icon="🐾", layout="wide")
 
-st.title("🐾 Animalov - Atualizador Automático do BI")
-st.markdown("Faça o upload do extrato de vendas do Simplesvet e atualize o painel no Google Sheets em 1 clique.")
+st.title("🐾 Animalov - Dashboard de Inteligência de Negócios (BI)")
+st.markdown("Acompanhe o faturamento, rateio de custos e margem líquida por departamento em tempo real.")
 
-# 1. Entrada do Valor de Contas Pagas do Mês
-contas_pagas = st.number_input(
-    "Informe o Total de Contas Pagas no Mês (R$):", 
+# Barra lateral para configurações e filtros
+st.sidebar.header("⚙️ Parâmetros do Mês")
+contas_pagas = st.sidebar.number_input(
+    "Informe o Total de Contas Pagas (R$):", 
     min_value=0.0, 
     value=30000.00, 
     step=100.00,
     format="%.2f"
 )
 
-# 2. Upload do Arquivo CSV do Simplesvet
-uploaded_file = st.file_uploader("Arraste ou selecione o arquivo CSV do Simplesvet", type=["csv"])
+# Upload do arquivo CSV do Simplesvet
+uploaded_file = st.sidebar.file_uploader("📂 Envie o CSV do Simplesvet", type=["csv"])
 
 if uploaded_file is not None:
-    if st.button("🚀 Processar e Atualizar Google Sheets", type="primary"):
-        with st.spinner("Processando dados e enviando para o Google Sheets..."):
-            try:
-                # Lê o CSV enviado pelo navegador
-                df = pd.read_csv(uploaded_file, sep=';', encoding='latin1', on_bad_lines='skip')
-                
-                # Tratamento de Datas
-                df['Data_Hora'] = pd.to_datetime(df['Data e hora'], format='%d/%m/%Y %H:%M', errors='coerce')
-                df['Data_Apenas'] = df['Data_Hora'].dt.date
-                df['Mes_Ano'] = df['Data_Hora'].dt.strftime('%m/%Y')
-                
-                # Tratamento de Valores Numéricos
-                colunas_valores = ['Líquido', 'Bruto', 'Valor Unitário']
-                for col in colunas_valores:
-                    if col in df.columns:
-                        df[col] = (
-                            df[col].astype(str)
-                            .str.replace('.', '', regex=False)
-                            .str.replace(',', '.', regex=False)
-                            .astype(float)
-                        )
+    # Processamento dos dados
+    df = pd.read_csv(uploaded_file, sep=';', encoding='latin1', on_bad_lines='skip')
+    
+    df['Data_Hora'] = pd.to_datetime(df['Data e hora'], format='%d/%m/%Y %H:%M', errors='coerce')
+    df['Data_Apenas'] = df['Data_Hora'].dt.date
+    df['Mes_Ano'] = df['Data_Hora'].dt.strftime('%m/%Y')
+    
+    colunas_valores = ['Líquido', 'Bruto', 'Valor Unitário']
+    for col in colunas_valores:
+        if col in df.columns:
+            df[col] = (
+                df[col].astype(str)
+                .str.replace('.', '', regex=False)
+                .str.replace(',', '.', regex=False)
+                .astype(float)
+            )
 
-                # Classificação de Departamentos
-                def classificar_departamento(row):
-                    grupo = str(row.get('Grupo', ''))
-                    tipo = str(row.get('Tipo do Item', ''))
-                    
-                    if grupo == 'Farmácia':
-                        return 'Farmácia (Medicamentos)'
-                    if tipo == 'Produto':
-                        return 'Petshop (Produtos)'
-                    if grupo in ['Banho', 'Tosa', 'Hidratação', 'Desembolo', 'Corte de Unhas', 'Higiene e Beleza']:
-                        return 'Estética Pet'
-                    if grupo in ['Consultas', 'Vacinas', 'Cirurgias', 'Exames', 'Procedimentos'] or tipo == 'Procedimento Petlove':
-                        return 'Clínica Veterinária'
-                    if grupo == 'Transporte':
-                        return 'Táxi Pet'
-                    if grupo == 'Hospedagem':
-                        return 'Creche & Hotel'
-                    return 'Outros'
+    # Classificação de Departamentos
+    def classificar_departamento(row):
+        grupo = str(row.get('Grupo', ''))
+        tipo = str(row.get('Tipo du Item', ''))
+        
+        if grupo == 'Farmácia':
+            return 'Farmácia (Medicamentos)'
+        if tipo == 'Produto':
+            return 'Petshop (Produtos)'
+        if grupo in ['Banho', 'Tosa', 'Hidratação', 'Desembolo', 'Corte de Unhas', 'Higiene e Beleza']:
+            return 'Estética Pet'
+        if grupo in ['Consultas', 'Vacinas', 'Cirurgias', 'Exames', 'Procedimentos'] or tipo == 'Procedimento Petlove':
+            return 'Clínica Veterinária'
+        if grupo == 'Transporte':
+            return 'Táxi Pet'
+        if grupo == 'Hospedagem':
+            return 'Creche & Hotel'
+        return 'Outros'
 
-                df['Departamento'] = df.apply(classificar_departamento, axis=1)
+    df['Departamento'] = df.apply(classificar_departamento, axis=1)
 
-                faturamento_total = df['Líquido'].sum()
-                dias_trabalhados = df['Data_Apenas'].nunique()
+    faturamento_total = df['Líquido'].sum()
+    dias_trabalhados = df['Data_Apenas'].nunique()
+    mes_ref = df['Mes_Ano'].iloc[0] if not df.empty else 'N/A'
 
-                resumo = df.groupby('Departamento')['Líquido'].agg(
-                    Faturamento='sum'
-                ).reset_index()
+    resumo = df.groupby('Departamento')['Líquido'].agg(
+        Faturamento='sum'
+    ).reset_index()
 
-                resumo['% Share'] = (resumo['Faturamento'] / faturamento_total)
-                resumo['Rateio Custo Total (R$)'] = resumo['% Share'] * contas_pagas
-                resumo['Custo Diário (R$)'] = resumo['Rateio Custo Total (R$)'] / dias_trabalhados
-                resumo['Resultado Líquido (R$)'] = resumo['Faturamento'] - resumo['Rateio Custo Total (R$)']
-                resumo['Margem (%)'] = resumo['Resultado Líquido (R$)'] / resumo['Faturamento']
+    resumo['% Share'] = (resumo['Faturamento'] / faturamento_total)
+    resumo['Rateio Custo Total (R$)'] = resumo['% Share'] * contas_pagas
+    resumo['Custo Diário (R$)'] = resumo['Rateio Custo Total (R$)'] / (dias_trabalhados if dias_trabalhados > 0 else 1)
+    resumo['Resultado Líquido (R$)'] = resumo['Faturamento'] - resumo['Rateio Custo Total (R$)']
+    resumo['Margem (%)'] = resumo['Resultado Líquido (R$)'] / resumo['Faturamento']
 
-                resumo = resumo.sort_values(by='Faturamento', ascending=False).reset_index(drop=True)
+    resumo = resumo.sort_values(by='Faturamento', ascending=False).reset_index(drop=True)
 
-                # Conexão Segura com o Google Sheets via Streamlit Secrets
-                # (As credenciais ficam salvas de forma segura no painel do Streamlit Cloud)
-                credenciais_dict = dict(st.secrets["gcp_service_account"])
-                gc = gspread.service_account_from_dict(credenciais_dict)
-                
-                id_planilha = "13gngB_axx-1L__qqoA2PGUXFp9XVexJA_zYQADUNOtQ"
-                sh = gc.open_by_key(id_planilha)
-                
-                try:
-                    ws = sh.worksheet('Dashboard')
-                except gspread.exceptions.WorksheetNotFound:
-                    ws = sh.add_worksheet(title='Dashboard', rows=100, cols=20)
+    # ==========================================
+    # EXIBIÇÃO DO BI NA INTERFACE DO STREAMLIT
+    # ==========================================
 
-                ws.clear()
+    st.markdown(f"### 📊 Visão Geral do Mês: **{mes_ref}**")
+    
+    # Cards de KPIs no topo
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("💰 Faturamento Total", f"R$ {faturamento_total:,.2f}")
+    col2.metric("📋 Total Contas Pagas", f"R$ {contas_pagas:,.2f}")
+    col3.metric("🎯 Resultado Líquido", f"R$ {faturamento_total - contas_pagas:,.2f}")
+    col4.metric("📅 Dias Úteis", dias_trabalhados)
 
-                mes_ref = df['Mes_Ano'].iloc[0] if not df.empty else 'N/A'
-                cabecalho_kpis = [
-                    ["Mês/Ano", mes_ref],
-                    ["Dias Úteis Trabalhados", dias_trabalhados],
-                    ["Total de Contas Pagas (R$)", contas_pagas],
-                    []
-                ]
-                
-                tabela_headers = [
-                    "Departamento", "Faturamento (R$)", "% Share", 
-                    "Rateio Custo Total (R$)", "Custo Diário (R$)", 
-                    "Resultado Líquido (R$)", "Margem (%)"
-                ]
-                
-                tabela_linhas = resumo.values.tolist()
-                
-                linha_total = [
-                    "TOTAL",
-                    faturamento_total,
-                    1.0,
-                    contas_pagas,
-                    contas_pagas / dias_trabalhados if dias_trabalhados > 0 else 0,
-                    faturamento_total - contas_pagas,
-                    (faturamento_total - contas_pagas) / faturamento_total
-                ]
-                
-                dados_finais = cabecalho_kpis + [tabela_headers] + tabela_linhas + [linha_total]
-                ws.update('A1', dados_finais)
-                
-                st.success("✅ Dashboard atualizado com sucesso no Google Sheets!")
-                
-                # Exibe uma prévia na tela
-                st.subheader("Prévia do Resultado Processado:")
-                st.dataframe(resumo, use_container_width=True)
+    st.divider()
 
-            except Exception as e:
-                st.error(f"Ocorreu um erro ao processar: {e}")
+    # Tabela de Indicadores Formatada
+    st.subheader("📋 Demonstrativo Financeiro por Departamento")
+    st.dataframe(
+        resumo.style.format({
+            'Faturamento': 'R$ {:,.2f}',
+            '% Share': '{:.1%}',
+            'Rateio Custo Total (R$)': 'R$ {:,.2f}',
+            'Custo Diário (R$)': 'R$ {:,.2f}',
+            'Resultado Líquido (R$)': 'R$ {:,.2f}',
+            'Margem (%)': '{:.1%}'
+        }),
+        use_container_width=True
+    )
+
+    st.divider()
+
+    # Gráficos Interativos
+    st.subheader("📈 Análise Gráfica")
+    col_g1, col_g2 = st.columns(2)
+
+    with col_g1:
+        fig_fat = px.bar(
+            resumo, 
+            x='Departamento', 
+            y='Faturamento', 
+            title='Faturamento por Departamento',
+            text_auto='.2s',
+            color='Faturamento',
+            color_continuousscale='blues'
+        )
+        st.plotly_chart(fig_fat, use_container_width=True)
+
+    with col_g2:
+        fig_res = px.bar(
+            resumo, 
+            x='Departamento', 
+            y='Resultado Líquido (R$)', 
+            title='Resultado Líquido por Departamento',
+            text_auto='.2s',
+            color='Resultado Líquido (R$)',
+            color_continuousscale='greens'
+        )
+        st.plotly_chart(fig_res, use_container_width=True)
+
+else:
+    st.info("👈 Por favor, defina o valor das contas pagas na barra lateral e faça o upload do arquivo CSV do Simplesvet para gerar o seu BI.")
