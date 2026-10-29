@@ -58,7 +58,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# FUNÇÕES DE LEITURA INTELIGENTE E ROBUSTA
+# FUNÇÕES DE LEITURA ROBUSTA E NORMALIZADA
 # ==========================================
 def carregar_dados_vendas(ws):
     dados = ws.get_all_values()
@@ -67,8 +67,19 @@ def carregar_dados_vendas(ws):
     if len(dados) <= 1:
         return pd.DataFrame(columns=colunas_padrao)
     
-    header = [c.strip() for c in dados[0]]
-    df = pd.DataFrame(dados[1:], columns=header if len(header) == len(dados[1]) else None)
+    header = [str(c).strip() for c in dados[0]]
+    rows = dados[1:]
+    
+    # Normaliza o tamanho de cada linha para coincidir rigorosamente com o cabeçalho
+    linhas_normalizadas = []
+    for r in rows:
+        if len(r) < len(header):
+            r = r + [''] * (len(header) - len(r))
+        elif len(r) > len(header):
+            r = r[:len(header)]
+        linhas_normalizadas.append(r)
+        
+    df = pd.DataFrame(linhas_normalizadas, columns=header)
     
     # Garante que todas as colunas padrão existem
     for col in colunas_padrao:
@@ -96,8 +107,18 @@ def carregar_dados_contas(ws):
     if len(dados) <= 1:
         return pd.DataFrame(columns=colunas_padrao)
     
-    header = [c.strip() for c in dados[0]]
-    df = pd.DataFrame(dados[1:], columns=header if len(header) == len(dados[1]) else None)
+    header = [str(c).strip() for c in dados[0]]
+    rows = dados[1:]
+    
+    linhas_normalizadas = []
+    for r in rows:
+        if len(r) < len(header):
+            r = r + [''] * (len(header) - len(r))
+        elif len(r) > len(header):
+            r = r[:len(header)]
+        linhas_normalizadas.append(r)
+        
+    df = pd.DataFrame(linhas_normalizadas, columns=header)
     
     for col in colunas_padrao:
         if col not in df.columns:
