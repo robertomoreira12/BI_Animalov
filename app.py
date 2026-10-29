@@ -60,9 +60,10 @@ except Exception as e:
 # ==========================================
 # FUNÇÕES DE LEITURA INTELIGENTE E ROBUSTA
 # ==========================================
+colunas_padrao = ['Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 'Grupo', 'Tipo_Item']
+
 def carregar_dados_vendas(ws):
     dados = ws.get_all_values()
-    colunas_padrao = ['Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 'Grupo', 'Tipo_Item']
     
     if len(dados) <= 1:
         return pd.DataFrame(columns=colunas_padrao)
@@ -79,6 +80,7 @@ def carregar_dados_vendas(ws):
         linhas_normalizadas.append(r)
         
     df = pd.DataFrame(linhas_normalizadas, columns=header)
+    df = df.loc[:, ~df.columns.duplicated()]
     
     for col in colunas_padrao:
         if col not in df.columns:
@@ -95,14 +97,14 @@ def carregar_dados_vendas(ws):
             )
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
             
-    return df
+    return df[colunas_padrao]
 
 def carregar_dados_contas(ws):
     dados = ws.get_all_values()
-    colunas_padrao = ['Mes_Ano', 'Valor_Contas_Pagas']
+    cols_contas = ['Mes_Ano', 'Valor_Contas_Pagas']
     
     if len(dados) <= 1:
-        return pd.DataFrame(columns=colunas_padrao)
+        return pd.DataFrame(columns=cols_contas)
     
     header = [str(c).strip() for c in dados[0]]
     rows = dados[1:]
@@ -116,8 +118,9 @@ def carregar_dados_contas(ws):
         linhas_normalizadas.append(r)
         
     df = pd.DataFrame(linhas_normalizadas, columns=header)
+    df = df.loc[:, ~df.columns.duplicated()]
     
-    for col in colunas_padrao:
+    for col in cols_contas:
         if col not in df.columns:
             df[col] = 0.0
             
@@ -133,14 +136,13 @@ def carregar_dados_contas(ws):
     else:
         df['Valor_Contas_Pagas'] = 0.0
         
-    return df
+    return df[cols_contas]
 
 # ==========================================
 # SIDEBAR - CARREGAMENTO / REGISTRO COM RAIO-X ABERTO
 # ==========================================
 st.sidebar.header("📥 Registar Novo Mês no Histórico")
 
-# Alterado para expanded=True para que o uploader apareça logo aberto na barra lateral
 with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
     uploaded_file = st.file_uploader("Enviar CSV do Simplesvet", type=["csv"])
     
@@ -151,11 +153,9 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
             uploaded_file.seek(0)
             df_temp = pd.read_csv(uploaded_file, sep=',', encoding='utf-8', on_bad_lines='skip')
 
-        # RAIO-X DO CSV
         st.write("🔍 **Colunas detetadas no seu CSV:**", list(df_temp.columns))
         st.dataframe(df_temp.head(2))
 
-        # Identifica dinamicamente a coluna de data
         coluna_data_csv = None
         for cand in ['Data e hora', 'Data', 'Data/Hora', 'Data da venda', 'Data/hora']:
             if cand in df_temp.columns:
@@ -182,7 +182,6 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
                     if col in df_new.columns:
                         df_new[col] = (
                             df_new[col].astype(str)
-                            .str.replace('R$', '', regex=False)
                             .str.replace('.', '', regex=False)
                             .str.replace(',', '.', regex=False)
                             .str.strip()
@@ -213,9 +212,13 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
                     'Tipo_Item': df_new.get('Tipo do Item', 'N/A').fillna('N/A')
                 }).dropna(subset=['Mes_Ano'])
 
+                # Seleção estrita das colunas padrão para prevenir duplicados ou conflitos de índice
+                df_salvar = df_salvar[colunas_padrao]
+
                 df_existente = carregar_dados_vendas(ws_historico)
                 if not df_existente.empty and 'Mes_Ano' in df_existente.columns:
                     df_existente = df_existente[~df_existente['Mes_Ano'].isin(meses_no_csv)]
+                    df_existente = df_existente[colunas_padrao]
                     df_final_base = pd.concat([df_existente, df_salvar], ignore_index=True)
                 else:
                     df_final_base = df_salvar
@@ -235,7 +238,6 @@ if df_historico.empty or df_historico['Líquido'].sum() == 0:
     st.info("ℹ️ A base de dados de vendas no Google Sheets está vazia. Use o painel lateral à esquerda para enviar o seu primeiro ficheiro CSV do Simplesvet.")
     st.stop()
 
-# Ordena os meses cronologicamente de forma correta
 meses_disponiveis = sorted(
     [m for m in df_historico['Mes_Ano'].unique().tolist() if pd.notna(m) and m != 'N/A' and m != ''],
     key=lambda x: pd.to_datetime(x, format='%m/%Y', errors='coerce')
