@@ -107,7 +107,7 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # Gráficos Interativos
+   # Gráficos Interativos
     st.subheader("📈 Análise Gráfica")
     col_g1, col_g2 = st.columns(2)
 
@@ -119,7 +119,7 @@ if uploaded_file is not None:
             title='Faturamento por Departamento',
             text_auto='.2s',
             color='Faturamento',
-            color_continuousscale='blues'
+            color_continuous_scale='Blues'
         )
         st.plotly_chart(fig_fat, use_container_width=True)
 
@@ -131,7 +131,7 @@ if uploaded_file is not None:
             title='Resultado Líquido por Departamento',
             text_auto='.2s',
             color='Resultado Líquido (R$)',
-            color_continuousscale='greens'
+            color_continuous_scale='Greens'
         )
         st.plotly_chart(fig_res, use_container_width=True)
 
