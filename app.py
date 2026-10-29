@@ -58,18 +58,19 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# FUNÇÕES DE LEITURA ROBUSTA E SEGURA
+# FUNÇÕES DE LEITURA INTELIGENTE E ROBUSTA
 # ==========================================
 def carregar_dados_vendas(ws):
     dados = ws.get_all_values()
     colunas_padrao = ['Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 'Grupo', 'Tipo_Item']
+    
     if len(dados) <= 1:
         return pd.DataFrame(columns=colunas_padrao)
     
-    df = pd.DataFrame(dados[1:], columns=dados[0])
-    # Remove espaços extras nos nomes das colunas vindas do Sheets
-    df.columns = df.columns.str.strip()
+    header = [c.strip() for c in dados[0]]
+    df = pd.DataFrame(dados[1:], columns=header if len(header) == len(dados[1]) else None)
     
+    # Garante que todas as colunas padrão existem
     for col in colunas_padrao:
         if col not in df.columns:
             df[col] = 'N/A'
@@ -91,24 +92,29 @@ def carregar_dados_vendas(ws):
 def carregar_dados_contas(ws):
     dados = ws.get_all_values()
     colunas_padrao = ['Mes_Ano', 'Valor_Contas_Pagas']
+    
     if len(dados) <= 1:
         return pd.DataFrame(columns=colunas_padrao)
     
-    df = pd.DataFrame(dados[1:], columns=dados[0])
-    df.columns = df.columns.str.strip()
+    header = [c.strip() for c in dados[0]]
+    df = pd.DataFrame(dados[1:], columns=header if len(header) == len(dados[1]) else None)
     
     for col in colunas_padrao:
         if col not in df.columns:
             df[col] = 0.0
             
-    df['Valor_Contas_Pagas'] = (
-        df['Valor_Contas_Pagas'].astype(str)
-        .str.replace('R$', '', regex=False)
-        .str.replace('.', '', regex=False)
-        .str.replace(',', '.', regex=False)
-        .str.strip()
-    )
-    df['Valor_Contas_Pagas'] = pd.to_numeric(df['Valor_Contas_Pagas'], errors='coerce').fillna(0.0)
+    if 'Valor_Contas_Pagas' in df.columns:
+        df['Valor_Contas_Pagas'] = (
+            df['Valor_Contas_Pagas'].astype(str)
+            .str.replace('R$', '', regex=False)
+            .str.replace('.', '', regex=False)
+            .str.replace(',', '.', regex=False)
+            .str.strip()
+        )
+        df['Valor_Contas_Pagas'] = pd.to_numeric(df['Valor_Contas_Pagas'], errors='coerce').fillna(0.0)
+    else:
+        df['Valor_Contas_Pagas'] = 0.0
+        
     return df
 
 # ==========================================
@@ -187,7 +193,7 @@ if df_historico.empty or df_historico['Líquido'].sum() == 0:
     st.info("ℹ️ A base de dados de vendas no Google Sheets está vazia. Use o painel lateral para enviar o primeiro CSV do Simplesvet.")
     st.stop()
 
-# Ordena os meses cronologicamente de forma correta (ex: Jan/2025, Fev/2025...)
+# Ordena os meses cronologicamente de forma correta
 meses_disponiveis = sorted(
     df_historico['Mes_Ano'].unique().tolist(),
     key=lambda x: pd.to_datetime(x, format='%m/%Y', errors='coerce')
