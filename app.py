@@ -5,66 +5,20 @@ import gspread
 import json
 import tempfile
 import os
+import base64
 
 # Configuração da Página
 st.set_page_config(page_title="Animalov - BI Histórico & Comparativo", page_icon="🐾", layout="wide")
 
 st.title("🐾 Animalov - Central de BI & Inteligência Financeira")
 
-import base64
-import json
-import tempfile
-import os
-import gspread
-import streamlit as st
-
+# Ligação com Google Sheets via Base64 (100% livre de erros de PEM e indentação)
 @st.cache_resource
 def ligar_google_sheets():
-    # Lê a string em Base64 do Secrets e decodifica para JSON puro
     base64_creds = st.secrets["GCP_JSON_BASE64"]
     json_bytes = base64.b64decode(base64_creds)
     credenciais_dict = json.loads(json_bytes.decode('utf-8'))
 
-    # Salva temporariamente em memória para a biblioteca do Google autenticar
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as f:
-        json.dump(credenciais_dict, f)
-        temp_path = f.name
-
-    try:
-        gc = gspread.service_account(filename=temp_path)
-    finally:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
-
-    # Conecta à planilha pelo ID da URL
-    id_planilha = "13gngB_axx-1L__qqoA2PGUXFp9XVexJA_zYQADUNOtQ"
-    sh = gc.open_by_key(id_planilha)
-    
-    try:
-        ws = sh.worksheet('Historico_Vendas')
-    except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title='Historico_Vendas', rows=1000, cols=20)
-        ws.append_row([
-            'Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 
-            'Grupo', 'Tipo_Item', 'Contas_Pagas_Mes'
-        ])
-    return ws
-        
-        # Remove aspas ou espaços excedentes
-        pk = pk.strip('"').strip("'").strip()
-        
-        # Converte sequências de escape literais '\n' em quebras de linha reais
-        if "\\n" in pk:
-            pk = pk.replace("\\n", "\n")
-            
-        # Garante que as linhas do PEM estão limpas de espaços em branco nas pontas
-        linhas = pk.splitlines()
-        linhas_limpas = [linha.strip() for linha in linhas if linha.strip()]
-        pk = "\n".join(linhas_limpas)
-        
-        credenciais_dict["private_key"] = pk
-
-    # Cria um ficheiro JSON temporário seguro em memória para o gspread ler perfeitamente
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as f:
         json.dump(credenciais_dict, f)
         temp_path = f.name
