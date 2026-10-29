@@ -53,12 +53,19 @@ except Exception as e:
 # ==========================================
 def carregar_dados_planilha(ws):
     dados_brutos = ws.get_all_values()
+    colunas_padrao = ['Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 'Grupo', 'Tipo_Item', 'Contas_Pagas_Mes']
+    
     if len(dados_brutos) <= 1:
-        return pd.DataFrame(columns=[
-            'Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 
-            'Grupo', 'Tipo_Item', 'Contas_Pagas_Mes'
-        ])
-    return pd.DataFrame(dados_brutos[1:], columns=dados_brutos[0])
+        return pd.DataFrame(columns=colunas_padrao)
+    
+    df = pd.DataFrame(dados_brutos[1:], columns=dados_brutos[0])
+    
+    # Garante que todas as colunas necessárias existam no DataFrame
+    for col in colunas_padrao:
+        if col not in df.columns:
+            df[col] = 0 if col == 'Contas_Pagas_Mes' else 'N/A'
+            
+    return df
 
 # ==========================================
 # SIDEBAR - CARREGAMENTO / REGISTRO
@@ -130,8 +137,8 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
 # ==========================================
 df_historico = carregar_dados_planilha(ws_historico)
 
-if df_historico.empty:
-    st.info("ℹ️ A base de dados no Google Sheets está vazia. Use o painel lateral para enviar o primeiro CSV do Simplesvet.")
+if df_historico.empty or df_historico['Líquido'].sum() == 0:
+    st.info("ℹ️ A base de dados no Google Sheets está vazia ou sem registros válidos. Use o painel lateral para enviar o primeiro CSV do Simplesvet.")
     st.stop()
 
 df_historico['Líquido'] = pd.to_numeric(df_historico['Líquido'], errors='coerce').fillna(0)
