@@ -58,28 +58,56 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# FUNÇÕES DE LEITURA SEGURA
+# FUNÇÕES DE LEITURA ROBUSTA E SEGURA
 # ==========================================
 def carregar_dados_vendas(ws):
     dados = ws.get_all_values()
-    colunas = ['Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 'Grupo', 'Tipo_Item']
+    colunas_padrao = ['Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 'Grupo', 'Tipo_Item']
     if len(dados) <= 1:
-        return pd.DataFrame(columns=colunas)
+        return pd.DataFrame(columns=colunas_padrao)
+    
     df = pd.DataFrame(dados[1:], columns=dados[0])
-    for col in colunas:
+    # Remove espaços extras nos nomes das colunas vindas do Sheets
+    df.columns = df.columns.str.strip()
+    
+    for col in colunas_padrao:
         if col not in df.columns:
             df[col] = 'N/A'
+            
+    # Converte colunas monetárias com segurança
+    for col in ['Líquido', 'Bruto']:
+        if col in df.columns:
+            df[col] = (
+                df[col].astype(str)
+                .str.replace('R$', '', regex=False)
+                .str.replace('.', '', regex=False)
+                .str.replace(',', '.', regex=False)
+                .str.strip()
+            )
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+            
     return df
 
 def carregar_dados_contas(ws):
     dados = ws.get_all_values()
-    colunas = ['Mes_Ano', 'Valor_Contas_Pagas']
+    colunas_padrao = ['Mes_Ano', 'Valor_Contas_Pagas']
     if len(dados) <= 1:
-        return pd.DataFrame(columns=colunas)
+        return pd.DataFrame(columns=colunas_padrao)
+    
     df = pd.DataFrame(dados[1:], columns=dados[0])
-    for col in colunas:
+    df.columns = df.columns.str.strip()
+    
+    for col in colunas_padrao:
         if col not in df.columns:
             df[col] = 0.0
+            
+    df['Valor_Contas_Pagas'] = (
+        df['Valor_Contas_Pagas'].astype(str)
+        .str.replace('R$', '', regex=False)
+        .str.replace('.', '', regex=False)
+        .str.replace(',', '.', regex=False)
+        .str.strip()
+    )
     df['Valor_Contas_Pagas'] = pd.to_numeric(df['Valor_Contas_Pagas'], errors='coerce').fillna(0.0)
     return df
 
@@ -95,39 +123,12 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
         df_temp = pd.read_csv(uploaded_file, sep=';', encoding='latin1', on_bad_lines='skip')
         df_temp['Data_Hora'] = pd.to_datetime(df_temp['Data e hora'], format='%d/%m/%Y %H:%M', errors='coerce')
         df_temp['Mes_Ano'] = df_temp['Data_Hora'].dt.strftime('%m/%Y')
-        mes_detectado = df_temp['Mes_Ano'].dropna().iloc[0] if not df_temp.empty else "N/A"
         
-        st.info(f"📅 Mês detectado no CSV: **{mes_detectado}**")
+        meses_no_csv = df_temp['Mes_Ano'].dropna().unique().tolist()
+        st.info(f"📅 Meses detectados no CSV: **{', '.join(meses_no_csv)}**")
         
-        # Puxa o custo registrado na aba Contas_Pagas do Sheets
-        df_contas_historico = carregar_dados_contas(ws_contas_pagas)
-        
-        custo_cadastrado = 0.0
-        if not df_contas_historico.empty and mes_detectado in df_contas_historico['Mes_Ano'].values:
-            val_match = df_contas_historico.loc[df_contas_historico['Mes_Ano'] == mes_detectado, 'Valor_Contas_Pagas'].values[0]
-            custo_cadastrado = float(val_match) if pd.notna(val_match) else 0.0
-        
-        if custo_cadastrado > 0:
-            st.success(f"💡 Contas pagas encontradas no Sheets: **R$ {custo_cadastrado:,.2f}**")
-            contas_pagas_input = custo_cadastrado
-        else:
-            st.warning(f"⚠️ Nenhuma conta paga encontrada na aba 'Contas_Pagas' para o mês {mes_detectado}. Informe abaixo:")
-            contas_pagas_input = st.number_input("Total Contas Pagas do Mês (R$):", min_value=0.0, value=30000.00, step=500.00, key="input_novo_custo")
-
         if st.button("💾 Guardar/Atualizar no Google Sheets"):
             with st.spinner("A processar e a guardar na base histórica..."):
-                # 1. Atualiza a aba Contas_Pagas
-                df_contas_atualizado = df_contas_historico.copy()
-                if not df_contas_atualizado.empty and 'Mes_Ano' in df_contas_atualizado.columns:
-                    df_contas_atualizado = df_contas_atualizado[df_contas_atualizado['Mes_Ano'] != mes_detectado]
-                
-                novo_reg_conta = pd.DataFrame([{'Mes_Ano': mes_detectado, 'Valor_Contas_Pagas': contas_pagas_input}])
-                df_contas_atualizado = pd.concat([df_contas_atualizado, novo_reg_conta], ignore_index=True)
-                
-                ws_contas_pagas.clear()
-                ws_contas_pagas.update([df_contas_atualizado.columns.values.tolist()] + df_contas_atualizado.values.tolist())
-
-                # 2. Processa e atualiza a aba Historico_Vendas
                 df_new = df_temp.copy()
                 
                 for col in ['Líquido', 'Bruto']:
@@ -163,17 +164,17 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
                     'Tipo_Item': df_new['Tipo do Item'].fillna('N/A')
                 }).dropna(subset=['Mes_Ano'])
 
+                # Remove os meses enviados para substituir pelas versões atualizadas
                 df_existente = carregar_dados_vendas(ws_historico)
-                
                 if not df_existente.empty and 'Mes_Ano' in df_existente.columns:
-                    df_existente = df_existente[df_existente['Mes_Ano'] != mes_detectado]
+                    df_existente = df_existente[~df_existente['Mes_Ano'].isin(meses_no_csv)]
                     df_final_base = pd.concat([df_existente, df_salvar], ignore_index=True)
                 else:
                     df_final_base = df_salvar
 
                 ws_historico.clear()
                 ws_historico.update([df_final_base.columns.values.tolist()] + df_final_base.values.tolist())
-                st.success(f"Mês {mes_detectado} registado/atualizado com sucesso nas duas abas!")
+                st.success(f"Dados atualizados com sucesso para os meses: {', '.join(meses_no_csv)}!")
                 st.rerun()
 
 # ==========================================
@@ -186,8 +187,11 @@ if df_historico.empty or df_historico['Líquido'].sum() == 0:
     st.info("ℹ️ A base de dados de vendas no Google Sheets está vazia. Use o painel lateral para enviar o primeiro CSV do Simplesvet.")
     st.stop()
 
-df_historico['Líquido'] = pd.to_numeric(df_historico['Líquido'], errors='coerce').fillna(0)
-meses_disponiveis = sorted(df_historico['Mes_Ano'].unique().tolist())
+# Ordena os meses cronologicamente de forma correta (ex: Jan/2025, Fev/2025...)
+meses_disponiveis = sorted(
+    df_historico['Mes_Ano'].unique().tolist(),
+    key=lambda x: pd.to_datetime(x, format='%m/%Y', errors='coerce')
+)
 
 def obter_contas_mes(mes):
     match = df_contas_historico[df_contas_historico['Mes_Ano'] == mes]
