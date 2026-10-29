@@ -1,139 +1,232 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import gspread
 
-# Configuração da Página no Navegador (Layout Largo para aproveitar a tela)
-st.set_page_config(page_title="Animalov - BI & Gestão", page_icon="🐾", layout="wide")
+# Configuração da Página
+st.set_page_config(page_title="Animalov - BI Histórico & Comparativo", page_icon="🐾", layout="wide")
 
-st.title("🐾 Animalov - Dashboard de Inteligência de Negócios (BI)")
-st.markdown("Acompanhe o faturamento, rateio de custos e margem líquida por departamento em tempo real.")
+st.title("🐾 Animalov - Central de BI & Inteligência Financeira")
 
-# Barra lateral para configurações e filtros
-st.sidebar.header("⚙️ Parâmetros do Mês")
-contas_pagas = st.sidebar.number_input(
-    "Informe o Total de Contas Pagas (R$):", 
-    min_value=0.0, 
-    value=30000.00, 
-    step=100.00,
-    format="%.2f"
-)
-
-# Upload do arquivo CSV do Simplesvet
-uploaded_file = st.sidebar.file_uploader("📂 Envie o CSV do Simplesvet", type=["csv"])
-
-if uploaded_file is not None:
-    # Processamento dos dados
-    df = pd.read_csv(uploaded_file, sep=';', encoding='latin1', on_bad_lines='skip')
+# Conexão com Google Sheets via Secrets
+@st.cache_resource
+def conectar_google_sheets():
+    credenciais_dict = dict(st.secrets["gcp_service_account"])
+    if "private_key" in credenciais_dict:
+        credenciais_dict["private_key"] = credenciais_dict["private_key"].replace("\\n", "\n")
+    gc = gspread.service_account_from_dict(credenciais_dict)
+    id_planilha = "13gngB_axx-1L__qqoA2PGUXFp9XVexJA_zYQADUNOtQ"
+    sh = gc.open_by_key(id_planilha)
     
-    df['Data_Hora'] = pd.to_datetime(df['Data e hora'], format='%d/%m/%Y %H:%M', errors='coerce')
-    df['Data_Apenas'] = df['Data_Hora'].dt.date
-    df['Mes_Ano'] = df['Data_Hora'].dt.strftime('%m/%Y')
+    try:
+        ws = sh.worksheet('Historico_Vendas')
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title='Historico_Vendas', rows=1000, cols=20)
+        # Cria cabeçalhos na planilha caso seja nova
+        ws.append_row([
+            'Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', 
+            'Grupo', 'Tipo_Item', 'Contas_Pagas_Mes'
+        ])
+    return ws
+
+try:
+    ws_historico = conectar_google_sheets()
+except Exception as e:
+    st.error(f"Erro ao conectar com a base do Google Sheets: {e}")
+    st.stop()
+
+# ==========================================
+# SIDEBAR - NOVO CARREGAMENTO / REGISTRO
+# ==========================================
+st.sidebar.header("📥 Registrar Novo Mês no Histórico")
+
+with st.sidebar.expander("Upload de Dados (Simplesvet)"):
+    contas_pagas_input = st.number_input("Total Contas Pagas do Mês (R$):", min_value=0.0, value=30000.00, step=500.00)
+    uploaded_file = st.file_uploader("Enviar CSV do Simplesvet", type=["csv"])
     
-    colunas_valores = ['Líquido', 'Bruto', 'Valor Unitário']
-    for col in colunas_valores:
-        if col in df.columns:
-            df[col] = (
-                df[col].astype(str)
-                .str.replace('.', '', regex=False)
-                .str.replace(',', '.', regex=False)
-                .astype(float)
-            )
+    if uploaded_file and st.button("💾 Salvar/Atualizar no Google Sheets"):
+        with st.spinner("Processando e salvando na base histórica..."):
+            df_new = pd.read_csv(uploaded_file, sep=';', encoding='latin1', on_bad_lines='skip')
+            
+            df_new['Data_Hora'] = pd.to_datetime(df_new['Data e hora'], format='%d/%m/%Y %H:%M', errors='coerce')
+            df_new['Mes_Ano'] = df_new['Data_Hora'].dt.strftime('%m/%Y')
+            
+            for col in ['Líquido', 'Bruto']:
+                if col in df_new.columns:
+                    df_new[col] = (
+                        df_new[col].astype(str)
+                        .str.replace('.', '', regex=False)
+                        .str.replace(',', '.', regex=False)
+                        .astype(float)
+                    )
 
-    # Classificação de Departamentos
-    def classificar_departamento(row):
-        grupo = str(row.get('Grupo', ''))
-        tipo = str(row.get('Tipo du Item', ''))
-        
-        if grupo == 'Farmácia':
-            return 'Farmácia (Medicamentos)'
-        if tipo == 'Produto':
-            return 'Petshop (Produtos)'
-        if grupo in ['Banho', 'Tosa', 'Hidratação', 'Desembolo', 'Corte de Unhas', 'Higiene e Beleza']:
-            return 'Estética Pet'
-        if grupo in ['Consultas', 'Vacinas', 'Cirurgias', 'Exames', 'Procedimentos'] or tipo == 'Procedimento Petlove':
-            return 'Clínica Veterinária'
-        if grupo == 'Transporte':
-            return 'Táxi Pet'
-        if grupo == 'Hospedagem':
-            return 'Creche & Hotel'
-        return 'Outros'
+            def classificar_departamento(row):
+                grupo = str(row.get('Grupo', ''))
+                tipo = str(row.get('Tipo do Item', ''))
+                
+                if grupo == 'Farmácia': return 'Farmácia (Medicamentos)'
+                if tipo == 'Produto': return 'Petshop (Produtos)'
+                if grupo in ['Banho', 'Tosa', 'Hidratação', 'Desembolo', 'Corte de Unhas', 'Higiene e Beleza']: return 'Estética Pet'
+                if grupo in ['Consultas', 'Vacinas', 'Cirurgias', 'Exames', 'Procedimentos'] or tipo == 'Procedimento Petlove': return 'Clínica Veterinária'
+                if grupo == 'Transporte': return 'Táxi Pet'
+                if grupo == 'Hospedagem': return 'Creche & Hotel'
+                return 'Outros'
 
-    df['Departamento'] = df.apply(classificar_departamento, axis=1)
+            df_new['Departamento'] = df_new.apply(classificar_departamento, axis=1)
+            
+            # Prepara dados limpos para salvar no Sheets
+            df_salvar = pd.DataFrame({
+                'Mes_Ano': df_new['Mes_Ano'],
+                'Data_Hora': df_new['Data_Hora'].dt.strftime('%Y-%m-%d %H:%M'),
+                'Departamento': df_new['Departamento'],
+                'Líquido': df_new['Líquido'],
+                'Bruto': df_new['Bruto'],
+                'Grupo': df_new['Grupo'].fillna('N/A'),
+                'Tipo_Item': df_new['Tipo do Item'].fillna('N/A'),
+                'Contas_Pagas_Mes': contas_pagas_input
+            }).dropna(subset=['Mes_Ano'])
 
-    faturamento_total = df['Líquido'].sum()
-    dias_trabalhados = df['Data_Apenas'].nunique()
-    mes_ref = df['Mes_Ano'].iloc[0] if not df.empty else 'N/A'
+            # Atualiza na planilha (substitui se o mês já existir ou adiciona se for novo)
+            dados_existentes = ws_historico.get_all_records()
+            df_existente = pd.DataFrame(dados_existentes)
+            
+            mes_carregado = df_salvar['Mes_Ano'].iloc[0]
+            
+            if not df_existente.empty and 'Mes_Ano' in df_existente.columns:
+                df_existente = df_existente[df_existente['Mes_Ano'] != mes_carregado]
+                df_final_base = pd.concat([df_existente, df_salvar], ignore_index=True)
+            else:
+                df_final_base = df_salvar
 
-    resumo = df.groupby('Departamento')['Líquido'].agg(
-        Faturamento='sum'
-    ).reset_index()
+            ws_historico.clear()
+            ws_historico.update([df_final_base.columns.values.tolist()] + df_final_base.values.tolist())
+            st.success(f"Mês {mes_carregado} registrado/atualizado com sucesso!")
+            st.rerun()
 
-    resumo['% Share'] = (resumo['Faturamento'] / faturamento_total)
-    resumo['Rateio Custo Total (R$)'] = resumo['% Share'] * contas_pagas
-    resumo['Custo Diário (R$)'] = resumo['Rateio Custo Total (R$)'] / (dias_trabalhados if dias_trabalhados > 0 else 1)
-    resumo['Resultado Líquido (R$)'] = resumo['Faturamento'] - resumo['Rateio Custo Total (R$)']
-    resumo['Margem (%)'] = resumo['Resultado Líquido (R$)'] / resumo['Faturamento']
+# ==========================================
+# CARREGAMENTO DA BASE HISTÓRICA DO GOOGLE SHEETS
+# ==========================================
+records = ws_historico.get_all_records()
+df_historico = pd.DataFrame(records)
 
-    resumo = resumo.sort_values(by='Faturamento', ascending=False).reset_index(drop=True)
+if df_historico.empty:
+    st.info("ℹ️ A base de dados no Google Sheets está vazia. Use o painel lateral para enviar o primeiro CSV do Simplesvet.")
+    st.stop()
 
-    # ==========================================
-    # EXIBIÇÃO DO BI NA INTERFACE DO STREAMLIT
-    # ==========================================
+# Garantir tipos corretos
+df_historico['Líquido'] = pd.to_numeric(df_historico['Líquido'], errors='coerce').fillna(0)
+df_historico['Contas_Pagas_Mes'] = pd.to_numeric(df_historico['Contas_Pagas_Mes'], errors='coerce').fillna(0)
+meses_disponiveis = sorted(df_historico['Mes_Ano'].unique().tolist())
 
-    st.markdown(f"### 📊 Visão Geral do Mês: **{mes_ref}**")
+# ==========================================
+# NAVEGAÇÃO E ANÁLISE NO STREAMLIT
+# ==========================================
+st.sidebar.divider()
+modo_analise = st.sidebar.radio("🔍 Modo de Análise", ["Mês Individual", "Comparativo Entre Meses", "Visão Geral do Histórico"])
+
+def calcular_resumo(df_filtrado):
+    contas_pagas = df_filtrado['Contas_Pagas_Mes'].iloc[0] if not df_filtrado.empty else 0
+    fat_total = df_filtrado['Líquido'].sum()
     
-    # Cards de KPIs no topo
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("💰 Faturamento Total", f"R$ {faturamento_total:,.2f}")
-    col2.metric("📋 Total Contas Pagas", f"R$ {contas_pagas:,.2f}")
-    col3.metric("🎯 Resultado Líquido", f"R$ {faturamento_total - contas_pagas:,.2f}")
-    col4.metric("📅 Dias Úteis", dias_trabalhados)
+    resumo = df_filtrado.groupby('Departamento')['Líquido'].sum().reset_index()
+    resumo.rename(columns={'Líquido': 'Faturamento'}, inplace=True)
+    resumo['% Share'] = resumo['Faturamento'] / fat_total if fat_total > 0 else 0
+    resumo['Custo Rateado'] = resumo['% Share'] * contas_pagas
+    resumo['Resultado Líquido'] = resumo['Faturamento'] - resumo['Custo Rateado']
+    resumo['Margem %'] = resumo['Resultado Líquido'] / resumo['Faturamento']
+    return resumo, fat_total, contas_pagas
 
+# 1. MÊS INDIVIDUAL
+if modo_analise == "Mês Individual":
+    mes_sel = st.selectbox("Selecione o Mês para Análise:", meses_disponiveis, index=len(meses_disponiveis)-1)
+    
+    df_mes = df_historico[df_historico['Mes_Ano'] == mes_sel]
+    resumo, fat_total, contas_pagas = calcular_resumo(df_mes)
+    
+    st.subheader(f"📊 Relatório Financeiro: {mes_sel}")
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Faturamento Total", f"R$ {fat_total:,.2f}")
+    c2.metric("Contas Pagas", f"R$ {contas_pagas:,.2f}")
+    c3.metric("Resultado Líquido", f"R$ {fat_total - contas_pagas:,.2f}")
+    
     st.divider()
-
-    # Tabela de Indicadores Formatada
-    st.subheader("📋 Demonstrativo Financeiro por Departamento")
+    
     st.dataframe(
         resumo.style.format({
             'Faturamento': 'R$ {:,.2f}',
             '% Share': '{:.1%}',
-            'Rateio Custo Total (R$)': 'R$ {:,.2f}',
-            'Custo Diário (R$)': 'R$ {:,.2f}',
-            'Resultado Líquido (R$)': 'R$ {:,.2f}',
-            'Margem (%)': '{:.1%}'
-        }),
-        use_container_width=True
+            'Custo Rateado': 'R$ {:,.2f}',
+            'Resultado Líquido': 'R$ {:,.2f}',
+            'Margem %': '{:.1%}'
+        }), use_container_width=True
     )
-
-    st.divider()
-
-   # Gráficos Interativos
-    st.subheader("📈 Análise Gráfica")
+    
     col_g1, col_g2 = st.columns(2)
-
     with col_g1:
-        fig_fat = px.bar(
-            resumo, 
-            x='Departamento', 
-            y='Faturamento', 
-            title='Faturamento por Departamento',
-            text_auto='.2s',
-            color='Faturamento',
-            color_continuous_scale='Blues'
-        )
-        st.plotly_chart(fig_fat, use_container_width=True)
-
+        fig1 = px.bar(resumo, x='Departamento', y='Faturamento', title='Faturamento por Departamento', color='Faturamento', color_continuous_scale='Blues')
+        st.plotly_chart(fig1, use_container_width=True)
     with col_g2:
-        fig_res = px.bar(
-            resumo, 
-            x='Departamento', 
-            y='Resultado Líquido (R$)', 
-            title='Resultado Líquido por Departamento',
-            text_auto='.2s',
-            color='Resultado Líquido (R$)',
-            color_continuous_scale='Greens'
-        )
-        st.plotly_chart(fig_res, use_container_width=True)
+        fig2 = px.pie(resumo, values='Faturamento', names='Departamento', title='Distribuição do Faturamento (% Share)')
+        st.plotly_chart(fig2, use_container_width=True)
 
-else:
-    st.info("👈 Por favor, defina o valor das contas pagas na barra lateral e faça o upload do arquivo CSV do Simplesvet para gerar o seu BI.")
+# 2. COMPARATIVO ENTRE MESES
+elif modo_analise == "Comparativo Entre Meses":
+    st.subheader("⚔️ Comparativo Direto Entre Dois Meses")
+    
+    if len(meses_disponiveis) < 2:
+        st.warning("É necessário carregar pelo menos 2 meses no histórico para fazer análises comparativas.")
+    else:
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            mes1 = st.selectbox("Selecione o Mês Base (Mês 1):", meses_disponiveis, index=0)
+        with col_m2:
+            mes2 = st.selectbox("Selecione o Mês de Comparação (Mês 2):", meses_disponiveis, index=len(meses_disponiveis)-1)
+            
+        res1, fat1, cp1 = calcular_resumo(df_historico[df_historico['Mes_Ano'] == mes1])
+        res2, fat2, cp2 = calcular_resumo(df_historico[df_historico['Mes_Ano'] == mes2])
+        
+        # Consolidação Comparativa
+        comp = pd.merge(res1[['Departamento', 'Faturamento', 'Resultado Líquido']], 
+                        res2[['Departamento', 'Faturamento', 'Resultado Líquido']], 
+                        on='Departamento', how='outer', suffixes=(f' ({mes1})', f' ({mes2})')).fillna(0)
+        
+        comp['Variação Fat (R$)'] = comp[f'Faturamento ({mes2})'] - comp[f'Faturamento ({mes1})']
+        comp['Crescimento (%)'] = (comp['Variação Fat (R$)'] / comp[f'Faturamento ({mes1})']).fillna(0)
+
+        st.divider()
+        st.markdown(f"#### 📈 Variação de Faturamento Total: **{((fat2 - fat1)/fat1)*100:+.1f}%**")
+        
+        st.dataframe(
+            comp.style.format({
+                f'Faturamento ({mes1})': 'R$ {:,.2f}',
+                f'Faturamento ({mes2})': 'R$ {:,.2f}',
+                f'Resultado Líquido ({mes1})': 'R$ {:,.2f}',
+                f'Resultado Líquido ({mes2})': 'R$ {:,.2f}',
+                'Variação Fat (R$)': 'R$ {:,.2f}',
+                'Crescimento (%)': '{:+.1%}'
+            }), use_container_width=True
+        )
+
+        fig_comp = px.bar(
+            comp, x='Departamento', y=[f'Faturamento ({mes1})', f'Faturamento ({mes2})'],
+            barmode='group', title=f'Comparativo de Faturamento: {mes1} vs {mes2}'
+        )
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+# 3. VISÃO GERAL DO HISTÓRICO
+elif modo_analise == "Visão Geral do Histórico":
+    st.subheader("📈 Evolução Histórica Completa")
+    
+    df_evo = df_historico.groupby('Mes_Ano').agg({
+        'Líquido': 'sum',
+        'Contas_Pagas_Mes': 'first'
+    }).reset_index()
+    
+    df_evo['Resultado Líquido'] = df_evo['Líquido'] - df_evo['Contas_Pagas_Mes']
+    
+    fig_evo = px.line(
+        df_evo, x='Mes_Ano', y=['Líquido', 'Contas_Pagas_Mes', 'Resultado Líquido'],
+        markers=True, title='Evolução Mensal de Faturamento, Custos e Resultado'
+    )
+    st.plotly_chart(fig_evo, use_container_width=True)
