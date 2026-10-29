@@ -58,7 +58,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# FUNÇÕES DE LEITURA ROBUSTA E NORMALIZADA
+# FUNÇÕES DE LEITURA INTELIGENTE E ROBUSTA
 # ==========================================
 def carregar_dados_vendas(ws):
     dados = ws.get_all_values()
@@ -70,7 +70,6 @@ def carregar_dados_vendas(ws):
     header = [str(c).strip() for c in dados[0]]
     rows = dados[1:]
     
-    # Normaliza o tamanho de cada linha para coincidir rigorosamente com o cabeçalho
     linhas_normalizadas = []
     for r in rows:
         if len(r) < len(header):
@@ -81,12 +80,10 @@ def carregar_dados_vendas(ws):
         
     df = pd.DataFrame(linhas_normalizadas, columns=header)
     
-    # Garante que todas as colunas padrão existem
     for col in colunas_padrao:
         if col not in df.columns:
             df[col] = 'N/A'
             
-    # Converte colunas monetárias com segurança
     for col in ['Líquido', 'Bruto']:
         if col in df.columns:
             df[col] = (
@@ -148,7 +145,18 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
     
     if uploaded_file:
         df_temp = pd.read_csv(uploaded_file, sep=';', encoding='latin1', on_bad_lines='skip')
-        df_temp['Data_Hora'] = pd.to_datetime(df_temp['Data e hora'], format='%d/%m/%Y %H:%M', errors='coerce')
+        
+        # Identifica dinamicamente a coluna de data no CSV do Simplesvet
+        coluna_data_csv = None
+        for cand in ['Data e hora', 'Data', 'Data/Hora', 'Data da venda']:
+            if cand in df_temp.columns:
+                coluna_data_csv = cand
+                break
+                
+        if coluna_data_csv is None:
+            coluna_data_csv = df_temp.columns[0] # Fallback para a primeira coluna
+            
+        df_temp['Data_Hora'] = pd.to_datetime(df_temp[coluna_data_csv], errors='coerce', dayfirst=True)
         df_temp['Mes_Ano'] = df_temp['Data_Hora'].dt.strftime('%m/%Y')
         
         meses_no_csv = df_temp['Mes_Ano'].dropna().unique().tolist()
@@ -191,7 +199,6 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)"):
                     'Tipo_Item': df_new['Tipo do Item'].fillna('N/A')
                 }).dropna(subset=['Mes_Ano'])
 
-                # Remove os meses enviados para substituir pelas versões atualizadas
                 df_existente = carregar_dados_vendas(ws_historico)
                 if not df_existente.empty and 'Mes_Ano' in df_existente.columns:
                     df_existente = df_existente[~df_existente['Mes_Ano'].isin(meses_no_csv)]
@@ -216,9 +223,13 @@ if df_historico.empty or df_historico['Líquido'].sum() == 0:
 
 # Ordena os meses cronologicamente de forma correta
 meses_disponiveis = sorted(
-    df_historico['Mes_Ano'].unique().tolist(),
+    [m for m in df_historico['Mes_Ano'].unique().tolist() if pd.notna(m) and m != 'N/A'],
     key=lambda x: pd.to_datetime(x, format='%m/%Y', errors='coerce')
 )
+
+if not meses_disponiveis:
+    st.error("⚠️ Não foram encontrados meses válidos na coluna 'Mes_Ano' do Google Sheets. Verifique se os dados na planilha contêm datas corretas.")
+    st.stop()
 
 def obter_contas_mes(mes):
     match = df_contas_historico[df_contas_historico['Mes_Ano'] == mes]
@@ -333,6 +344,7 @@ elif modo_analise == "Visão Geral do Histórico":
         custo_m = obter_contas_mes(m)
         lista_evo.append({
             'Mes_Ano': m,
+            'Líquion': fat_m, # Mantendo chave padrão
             'Líquido': fat_m,
             'Contas_Pagas': custo_m,
             'Resultado Líquido': fat_m - custo_m
