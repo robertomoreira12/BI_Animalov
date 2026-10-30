@@ -64,7 +64,6 @@ colunas_padrao = ['Mes_Ano', 'Data_Hora', 'Departamento', 'Líquido', 'Bruto', '
 
 def carregar_dados_vendas(ws):
     dados = ws.get_all_values()
-    
     if len(dados) <= 1:
         return pd.DataFrame(columns=colunas_padrao)
     
@@ -101,10 +100,8 @@ def carregar_dados_vendas(ws):
 
 def carregar_dados_contas(ws):
     dados = ws.get_all_values()
-    cols_contas = ['Mes_Ano', 'Valor_Contas_Pagas']
-    
     if len(dados) <= 1:
-        return pd.DataFrame(columns=cols_contas)
+        return pd.DataFrame(columns=['Mes_Ano', 'Valor_Contas_Pagas'])
     
     header = [str(c).strip() for c in dados[0]]
     rows = dados[1:]
@@ -117,31 +114,48 @@ def carregar_dados_contas(ws):
             r = r[:len(header)]
         linhas_normalizadas.append(r)
         
-    df = pd.DataFrame(linhas_normalizadas, columns=header)
-    df = df.loc[:, ~df.columns.duplicated()]
+    df_raw = pd.DataFrame(linhas_normalizadas, columns=header)
+    df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()]
     
-    for col in cols_contas:
-        if col not in df.columns:
-            df[col] = 0.0
+    # Detetando colunas de forma flexível
+    col_mes = None
+    col_val = None
+    for c in df_raw.columns:
+        c_lower = c.lower()
+        if any(k in c_lower for k in ['mes', 'mês', 'data', 'periodo', 'período', 'ano']):
+            col_mes = c
+        if any(k in c_lower for k in ['valor', 'conta', 'pagar', 'custo', 'total']):
+            col_val = c
             
-    if 'Valor_Contas_Pagas' in df.columns:
-        df['Valor_Contas_Pagas'] = (
-            df['Valor_Contas_Pagas'].astype(str)
+    if not col_mes and len(df_raw.columns) > 0:
+        col_mes = df_raw.columns[0]
+    if not col_val and len(df_raw.columns) > 1:
+        col_val = df_raw.columns[1]
+        
+    df_final = pd.DataFrame(columns=['Mes_Ano', 'Valor_Contas_Pagas'])
+    if col_mes and col_val:
+        df_final['Mes_Ano'] = df_raw[col_mes].astype(str).str.strip()
+        val_limpo = (
+            df_raw[col_val].astype(str)
             .str.replace('R$', '', regex=False)
             .str.replace('.', '', regex=False)
             .str.replace(',', '.', regex=False)
             .str.strip()
         )
-        df['Valor_Contas_Pagas'] = pd.to_numeric(df['Valor_Contas_Pagas'], errors='coerce').fillna(0.0)
-    else:
-        df['Valor_Contas_Pagas'] = 0.0
+        df_final['Valor_Contas_Pagas'] = pd.to_numeric(val_limpo, errors='coerce').fillna(0.0)
         
-    return df[cols_contas]
+    return df_final
 
 # ==========================================
-# SIDEBAR - CARREGAMENTO / REGISTRO COM RAIO-X ABERTO
+# SIDEBAR - CARREGAMENTO E DIAGNÓSTICO
 # ==========================================
-st.sidebar.header("📥 Registar Novo Mês no Histórico")
+st.sidebar.header("📥 Gestão de Dados")
+
+# Painel de Diagnóstico da Aba Contas_Pagas
+with st.sidebar.expander("🔎 Diagnóstico da Aba Contas_Pagas"):
+    df_contas_debug = carregar_dados_contas(ws_contas_pagas)
+    st.write("Dados lidos do Sheets (Contas):")
+    st.dataframe(df_contas_debug)
 
 with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
     uploaded_file = st.file_uploader("Enviar CSV do Simplesvet", type=["csv"])
@@ -153,8 +167,7 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
             uploaded_file.seek(0)
             df_temp = pd.read_csv(uploaded_file, sep=',', encoding='utf-8', on_bad_lines='skip')
 
-        st.write("🔍 **Colunas detetadas no seu CSV:**", list(df_temp.columns))
-        st.dataframe(df_temp.head(2))
+        st.write("🔍 **Colunas detetadas no CSV:**", list(df_temp.columns))
 
         coluna_data_csv = None
         for cand in ['Data e hora', 'Data', 'Data/Hora', 'Data da venda', 'Data/hora']:
@@ -174,7 +187,7 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
         else:
             st.error("⚠️ Não foi possível identificar nenhuma coluna de data no CSV.")
         
-        if st.button("💾 Guardar/Atualizar no Google Sheets"):
+        if st.button("💾 Guardar/Atualizar Vendas no Google Sheets"):
             with st.spinner("A processar e a guardar na base histórica..."):
                 df_new = df_temp.copy()
                 
@@ -212,7 +225,6 @@ with st.sidebar.expander("Upload de Dados (Simplesvet)", expanded=True):
                     'Tipo_Item': df_new.get('Tipo do Item', 'N/A').fillna('N/A')
                 }).dropna(subset=['Mes_Ano'])
 
-                # Seleção estrita das colunas padrão para prevenir duplicados ou conflitos de índice
                 df_salvar = df_salvar[colunas_padrao]
 
                 df_existente = carregar_dados_vendas(ws_historico)
@@ -235,7 +247,7 @@ df_historico = carregar_dados_vendas(ws_historico)
 df_contas_historico = carregar_dados_contas(ws_contas_pagas)
 
 if df_historico.empty or df_historico['Líquido'].sum() == 0:
-    st.info("ℹ️ A base de dados de vendas no Google Sheets está vazia. Use o painel lateral à esquerda para enviar o seu primeiro ficheiro CSV do Simplesvet.")
+    st.info("ℹ️ A base de dados de vendas no Google Sheets está vazia. Use o painel lateral à esquerda para enviar o seu primeiro ficheiro CSV.")
     st.stop()
 
 meses_disponiveis = sorted(
